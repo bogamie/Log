@@ -1,4 +1,5 @@
 ﻿using Newtonsoft.Json.Linq;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -8,52 +9,41 @@ public static class LogAnalyzer
     public static string Analyze(string logPath, string rulesPath)
     {
         JObject rules = JObject.Parse(File.ReadAllText(rulesPath));
-        var logValues = ParseLogFile(logPath);
-        return CompareWithRules(rules, logValues);
+        var targetKeys = new HashSet<string>(rules.Properties().Select(p => p.Name));
+        var logValues = ParseLogFileParallel(logPath, targetKeys);
+        return CompareWithRulesParallel(rules, logValues);
     }
 
-    static Dictionary<string, string> ParseLogFile(string path)
+    static Dictionary<string, string> ParseLogFileParallel(string path, HashSet<string> targetKeys)
     {
-        var values = new Dictionary<string, string>();
+        var values = new ConcurrentDictionary<string, string>();
+        var lines = File.ReadAllLines(path);
         var regex = new Regex(@"(?<key>\w+)\s*=\s*(?<val>-?\d+)", RegexOptions.IgnoreCase);
 
-        var jsonBuffer = new StringBuilder();
-        int braceCount = 0;
-
-        foreach (var line in File.ReadLines(path))
+        Parallel.ForEach(lines, line =>
         {
-            // 일반적인 key=val 패턴도 계속 파싱
             foreach (Match match in regex.Matches(line))
             {
-                values[match.Groups["key"].Value] = match.Groups["val"].Value;
+                string key = match.Groups["key"].Value;
+                if (targetKeys.Contains(key))
+                    values[key] = match.Groups["val"].Value;
             }
 
-            // JSON 블록 수집 시작
-            if (line.Contains("{"))
+            if (line.Contains("JsonObject") || line.Contains("makeVehicleStatus"))
             {
-                braceCount += line.Count(c => c == '{');
-                braceCount -= line.Count(c => c == '}');
-                jsonBuffer.AppendLine(line);
-
-                if (braceCount == 0 && jsonBuffer.Length > 0)
+                string jsonStr = ExtractJsonPart(line);
+                try
                 {
-                    string candidate = ExtractJsonPart(jsonBuffer.ToString());
-                    try
-                    {
-                        var jObj = JObject.Parse(candidate);
-                        ExtractJsonValues(jObj, values);
-                    }
-                    catch { /* JSON 파싱 실패 무시 */ }
-
-                    jsonBuffer.Clear();
+                    var jObj = JObject.Parse(jsonStr);
+                    ExtractJsonValues(jObj, values, targetKeys);
                 }
+                catch { /* 무시 */ }
             }
-        }
+        });
 
-        return values;
+        return new Dictionary<string, string>(values);
     }
 
-    // 로그 라인 안에서 JSON 부분만 추출
     static string ExtractJsonPart(string raw)
     {
         int start = raw.IndexOf('{');
@@ -63,39 +53,37 @@ public static class LogAnalyzer
         return "{}";
     }
 
-    // 🧠 재귀적으로 JSON key-value 펼치기
-    static void ExtractJsonValues(JToken token, Dictionary<string, string> dict, string prefix = "")
+    static void ExtractJsonValues(JToken token, ConcurrentDictionary<string, string> dict, HashSet<string> targetKeys, string prefix = "")
     {
         if (token is JObject obj)
         {
             foreach (var prop in obj.Properties())
             {
-                ExtractJsonValues(prop.Value, dict, $"{prefix}{prop.Name}.");
+                ExtractJsonValues(prop.Value, dict, targetKeys, $"{prefix}{prop.Name}.");
             }
         }
         else if (token is JArray array)
         {
             for (int i = 0; i < array.Count; i++)
             {
-                ExtractJsonValues(array[i], dict, $"{prefix}{i}.");
+                ExtractJsonValues(array[i], dict, targetKeys, $"{prefix}{i}.");
             }
         }
         else
         {
             string key = prefix.TrimEnd('.');
-            dict[key] = token.ToString();
+            if (targetKeys.Contains(key))
+                dict[key] = token.ToString();
         }
     }
 
-
-    private static string CompareWithRules(JObject rules, Dictionary<string, string> logData)
+    private static string CompareWithRulesParallel(JObject rules, Dictionary<string, string> logData)
     {
-        Debug.WriteLine("compare with rules 호출");
-        var sb = new System.Text.StringBuilder();
+        var results = new ConcurrentBag<string>();
 
-        foreach (var rule in rules)
+        Parallel.ForEach(rules.Properties(), rule =>
         {
-            string key = rule.Key;
+            string key = rule.Name;
             var ruleObj = (JObject)rule.Value;
 
             string description = ruleObj["description"]?.ToString();
@@ -104,8 +92,8 @@ public static class LogAnalyzer
 
             if (!logData.TryGetValue(key, out string actualRaw))
             {
-                sb.AppendLine($"❗ 로그에 키 '{key}' 없음");
-                continue;
+                results.Add($"❗ 로그에 키 '{key}' 없음");
+                return;
             }
 
             string actualHuman = map != null && map.TryGetValue(actualRaw, out var mapped)
@@ -113,11 +101,11 @@ public static class LogAnalyzer
                 : actualRaw;
 
             if (actualHuman == expected)
-                sb.AppendLine($"✅ {description} ({key}): {actualHuman} (일치)");
+                results.Add($"✅ {description} ({key}): {actualHuman} (일치)");
             else
-                sb.AppendLine($"❌ {description} ({key}): 기대값 '{expected}', 실제값 '{actualHuman}'");
-        }
+                results.Add($"❌ {description} ({key}): 기대값 '{expected}', 실제값 '{actualHuman}'");
+        });
 
-        return sb.ToString();
+        return string.Join(Environment.NewLine, results);
     }
 }
