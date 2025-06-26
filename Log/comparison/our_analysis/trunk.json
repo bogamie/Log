@@ -1,0 +1,26 @@
+{
+    "getLeftBifuncLampStatus": {
+        "description": "좌측 바이펑션 램프 상태",
+        "map": {
+            "0": "꺼짐",
+            "1": "켜짐"
+        },
+        "expected": "꺼짐"
+    },
+    "getRightBifuncLampStatus": {
+        "description": "우측 바이펑션 램프 상태",
+        "map": {
+            "0": "꺼짐",
+            "1": "켜짐"
+        },
+        "expected": "꺼짐"
+    },
+    "trunkOpen": {
+        "description": "트렁크 열림",
+        "map": {
+            "true": "열림",
+            "false": "닫힘"
+        },
+        "expected": "꺼짐"
+    }
+}
