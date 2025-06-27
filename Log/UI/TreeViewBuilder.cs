@@ -1,8 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Log.UI
 {
@@ -51,10 +54,34 @@ namespace Log.UI
 
             foreach (var file in dirInfo.GetFiles())
             {
-                directoryNode.Nodes.Add(new TreeNode(file.Name));
+                TreeNode fileNode = new TreeNode(file.Name);
+
+//                if (file.Extension == ".log")
+//                {
+                    try
+                    {
+                        string rulesPath = @"C:\Users\stara\Desktop\개발\log1\Log\Log\comparison\our_analysis\trunk.json"; // <-- rules.json 경로
+                        Debug.WriteLine("룰 시도");
+                        string result = LogAnalyzer.Analyze(file.FullName, rulesPath);
+
+                        // ✅ 분석 결과를 콘솔에 출력
+                        Debug.WriteLine($"🔍 분석 파일: {file.FullName}");
+                        Debug.WriteLine(result);
+                        Debug.WriteLine(new string('-', 40));
+
+                        fileNode.Tag = result; // 결과를 TreeNode에 저장할 수도 있음
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"❌ {file.FullName} 분석 실패: {ex.Message}");
+                    }
+//                }
+
+                directoryNode.Nodes.Add(fileNode);
             }
 
             return directoryNode;
         }
+
     }
 }
