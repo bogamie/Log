@@ -30,10 +30,9 @@ namespace Log
                 return;
             }
 
+            string targetDir;
             string selectedPath = dialog.SelectedTarPath;
             string extension = Path.GetExtension(selectedPath).ToLowerInvariant();
-
-            string targetDir;
 
             if (extension == ".tar" || extension == ".gz" || extension == ".tgz" || extension == ".gzip")
             {
@@ -60,8 +59,8 @@ namespace Log
                 this.Close();
                 return;
             }
-
-            TreeViewBuilder treeViewBuilder = new TreeViewBuilder(DirectoryTree);
+            TextUI textBox = new TextUI(contentBox);
+            TreeViewBuilder treeViewBuilder = new TreeViewBuilder(DirectoryTree, textBox);
             treeViewBuilder.BuildFromDirectory(targetDir);
         }
     }
